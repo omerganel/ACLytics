@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <!--title>MoveNet Knee Angle Analysis</title -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <!-- TensorFlow.js core -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <!-- TensorFlow.js WebGL backend -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <!-- Pose Detection (includes MoveNet) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      margin: 1rem; background: #f9f9f9;
+    }
+    #status {
+      margin-bottom: 0.5rem;
+      font-weight: bold;
+    }
+    #inputArea, #canvasArea, #controls, #gallery {
+      margin-top: 1rem;
+      width: 100%; max-width: 640px;
+      display: flex; justify-content: center;
+    }
+    #angleOutput {
+      margin-top: 0.5rem;
+      font-size: 1rem;
+      font-weight: bold;
+      text-align: center;
+    }
+    canvas {
+      border: 1px solid #ccc; border-radius: 4px;
+    }
+    #gallery {
+      flex-wrap: wrap; gap: 0.5rem;
+    }
+    #gallery img {
+      max-width: 200px; border: 1px solid #aaa; border-radius: 4px;
+    }
+    button {
+      margin: 0 0.5rem;
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1 class="mb-4">ACL Injury Risk Assessment</h1>
+
+  <!-- User Form -->
+  <form id="user-form" enctype="multipart/form-data">
+    <!-- Age -->
+    <div class="mb-3">
+      <label for="age">Age:</label>
+      <select id="age" class="form-select" required>
+        <option value="" disabled selected>Select age</option>
+      </select>
+    </div>
+
+    <!-- Height -->
+    <div class="mb-3">
+      <label for="height_total">Height (feet and inches):</label>
+      <select id="height_total" class="form-select" required>
+        <option value="" disabled selected>Select height</option>
+      </select>
+    </div>
+
+    <!-- Weight -->
+    <div class="mb-3">
+      <label for="weight">Weight (lbs):</label>
+      <input type="number" id="weight" class="form-control" min="50" max="300" required />
+    </div>
+
+    <!-- Sport -->
+    <div class="mb-3">
+      <label for="sport">Primary Sport:</label>
+      <select id="sport" class="form-select" required>
+        <option value="" disabled selected>Select sport</option>
+        <option>Soccer</option>
+        <option>Basketball</option>
+        <option>Football</option>
+        <option>Volleyball</option>
+        <option>Tennis</option>
+        <option>Padel</option>
+        <option>Track</option>
+      </select>
+    </div>
+
+  <!-- h1>MoveNet Knee Angle Analysis</h1 -->
+  <div id="status">Loading…</div>
+
+  <div id="inputArea">
+<input type="file" id="imageUpload" accept="image/*" disabled />
+  </div>
+
+  <div id="canvasArea">
+    <canvas id="overlay" width="320" height="240"></canvas>
+  </div>
+
+  <div id="controls">
+    <button id="analyzeBtn" type="button" disabled>Run Your Analysis</button>
+    <button id="captureBtn" type="button" hidden>Capture Annotated Image</button>
+  </div>
+  <div id="angleOutput"></div>
+
+  <div id="gallery"></div>
+
+
+
+  <script>
+    const statusEl     = document.getElementById('status');
+    const uploadInput  = document.getElementById('imageUpload');
+    const analyzeBtn   = document.getElementById('analyzeBtn');
+    const captureBtn   = document.getElementById('captureBtn');
+    const angleOutput  = document.getElementById('angleOutput');
+    const canvasEl     = document.getElementById('overlay');
+    const ctx          = canvasEl.getContext('2d');
+
+    let detector = null;
+    let uploadedImage = null;
+
+    // Compute angle at joint J for points A-J-B
+    function calculateAngle(a, j, b) {
+      const v1 = { x: a.x - j.x, y: a.y - j.y };
+      const v2 = { x: b.x - j.x, y: b.y - j.y };
+      const dot = v1.x * v2.x + v1.y * v2.y;
+      const mag1 = Math.hypot(v1.x, v1.y);
+      const mag2 = Math.hypot(v2.x, v2.y);
+      if (mag1 === 0 || mag2 === 0) return 0;
+      const cos = Math.min(Math.max(dot / (mag1 * mag2), -1), 1);
+      return Math.acos(cos) * (180 / Math.PI);
+    }
+
+    // 1. Load and initialize MoveNet
+    async function setupModel() {
+      try {
+        statusEl.innerText = 'Initializing…';
+        await tf.ready();
+        statusEl.innerText = 'Setting backend…';
+        await tf.setBackend('webgl');
+
+        statusEl.innerText = 'Loading…';
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
+          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+        );
+
+        statusEl.innerText = 'Please upload your image.';
+      } catch (err) {
+        console.error('Model load error:', err);
+        statusEl.innerText = `Error loading model: ${err.message}`;
+      }
+    }
+
+    // 2. Handle image upload
+    uploadInput.addEventListener('change', () => {
+      const file = uploadInput.files[0];
+      if (!file) return;
+
+      statusEl.innerText = 'Loading image…';
+      analyzeBtn.disabled = true;
+      captureBtn.disabled = true;
+      angleOutput.innerText = '';
+
+      const url = URL.createObjectURL(file);
+      uploadedImage = new Image();
+      uploadedImage.onload = () => {
+        canvasEl.width  = uploadedImage.width; 
+        canvasEl.height = uploadedImage.height; 
+        ctx.drawImage(uploadedImage, 0, 0);
+
+        statusEl.innerText = 'Image ready. Click “Run Your Analysis.”';
+        analyzeBtn.disabled = false;
+      };
+      uploadedImage.onerror = (e) => {
+        console.error('Image load error:', e);
+        statusEl.innerText = 'Error loading image.';
+      };
+      uploadedImage.src = url;
+    });
+
+    // 3. Run pose detection
+    analyzeBtn.addEventListener('click', async (event) => {
+  event.preventDefault();
+  if (!detector || !uploadedImage) return;
+
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  const runDetection = async () => {
+    attempts++;
+    statusEl.innerText = `Running pose detection… (Attempt ${attempts})`;
+    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    ctx.drawImage(uploadedImage, 0, 0);
+    angleOutput.innerText = '';
+
+    try {
+      const poses = await detector.estimatePoses(uploadedImage);
+      if (poses.length === 0) {
+        throw new Error('No person detected. Try another image.');
+      }
+
+      const keypoints = poses[0].keypoints;
+      const kp = keypoints.reduce((m, k) => (m[k.name] = k, m), {});
+
+      let leftAngle = 0, rightAngle = 0;
+      if (kp.left_hip?.score > 0.5 && kp.left_knee?.score > 0.5 && kp.left_ankle?.score > 0.5) {
+        leftAngle = calculateAngle(kp.left_hip, kp.left_knee, kp.left_ankle);
+      }
+      if (kp.right_hip?.score > 0.5 && kp.right_knee?.score > 0.5 && kp.right_ankle?.score > 0.5) {
+        rightAngle = calculateAngle(kp.right_hip, kp.right_knee, kp.right_ankle);
+      }
+
+      // If either angle is 0 and we haven't reached max attempts, retry
+      if ((leftAngle === 0 || rightAngle === 0) && attempts < maxAttempts) {
+        await runDetection();
+        return;
+      }
+
+      drawSkeleton(keypoints);
+      angleOutput.innerText = 
+        `Left knee angle: ${leftAngle.toFixed(1)}°   —   Right knee angle: ${rightAngle.toFixed(1)}°`;
+      statusEl.innerText = 'Pose detected! Creating new image...';
+captureBtn.disabled = false;
+
+// Automatically capture the canvas
+const img = new Image();
+img.src = canvasEl.toDataURL('image/png');
+document.getElementById('gallery').appendChild(img);
+
+<!-- API CALL -->
+
+// 📦 Wrap image and GPT response
+const wrapper = document.createElement('div');
+wrapper.style.marginBottom = '1rem';
+wrapper.appendChild(img);
+
+// 🧠 GPT response container
+const gptResponse = document.createElement('div');
+gptResponse.innerText = "Loading Your Analysis...";
+gptResponse.style.marginTop = '0.5rem';
+gptResponse.style.padding = '0.5rem';
+gptResponse.style.background = '#f1f1f1';
+gptResponse.style.border = '1px solid #ccc';
+gptResponse.style.borderRadius = '4px';
+gptResponse.style.fontSize = '14px';
+wrapper.appendChild(gptResponse);
+
+// 📥 Append both to gallery
+document.getElementById('gallery').appendChild(wrapper);
+
+// 📤 Send API call to Flask
+const age = document.getElementById('age').value;
+const height = document.getElementById('height_total').value;
+const weight = document.getElementById('weight').value;
+const sport = document.getElementById('sport').value;
+const imageBase64 = canvasEl.toDataURL("image/png");
+
+fetch("http://localhost:5000/api/gpt", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    age,
+    height,
+    weight,
+    sport,
+    leftKneeAngle: leftAngle.toFixed(1),
+    rightKneeAngle: rightAngle.toFixed(1),
+    imageBase64
+  })
+})
+.then(res => res.json())
+.then(data => {
+  gptResponse.innerText = data.reply || "No response received.";
+})
+.catch(err => {
+  gptResponse.innerText = "Error contacting GPT server: " + err.message;
+});
+<!-- API CALL END -->
+
+
+    } catch (err) {
+      console.error('Detection error:', err);
+      statusEl.innerText = `Error during detection: ${err.message}`;
+    }
+  };
+
+  await runDetection();
+});
+
+
+    // 4. Capture annotated image
+    captureBtn.addEventListener('click', () => {
+	event.preventDefault();
+      const img = new Image();
+      img.src = canvasEl.toDataURL('image/png');
+      document.getElementById('gallery').appendChild(img);
+    });
+
+    // Draw keypoints, skeleton, and knee-angle labels
+    function drawSkeleton(keypoints) {
+      ctx.fillStyle   = 'lime';
+      ctx.strokeStyle = 'lime';
+      ctx.lineWidth   = 2;
+
+      // Draw points
+      keypoints.forEach(kp => {
+        if (kp.score > 0.5) {
+          ctx.beginPath();
+          ctx.arc(kp.x, kp.y, 5, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      });
+
+      // Draw connections
+      const pairs = [
+        ['left_hip','left_knee'], ['left_knee','left_ankle'],
+        ['right_hip','right_knee'], ['right_knee','right_ankle']
+      ];
+      const lookup = keypoints.reduce((m, kp) => (m[kp.name] = kp, m), {});
+      pairs.forEach(([a, b]) => {
+        const p1 = lookup[a], p2 = lookup[b];
+        if (p1.score > 0.5 && p2.score > 0.5) {
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+      });
+
+      // Overlay knee angles in red
+      ctx.fillStyle = 'red';
+      ctx.font      = '18px Arial';
+      [['left_hip','left_knee','left_ankle'], ['right_hip','right_knee','right_ankle']]
+        .forEach(([a,j,b]) => {
+          const A = lookup[a], J = lookup[j], B = lookup[b];
+          if (A.score>0.5 && J.score>0.5 && B.score>0.5) {
+            const angle = calculateAngle(A, J, B);
+            ctx.fillText(`${angle.toFixed(0)}°`, J.x + 5, J.y - 5);
+          }
+        });
+    }
+
+    // Initialize on load
+    setupModel();
+  </script>
+  <script>
+    //let detector = null;
+    let modelReady = true;
+
+    // Populate age and height options
+    window.addEventListener('DOMContentLoaded', () => {
+      const ageSelect = document.getElementById('age');
+      for (let i = 10; i <= 99; i++) {
+        ageSelect.innerHTML += `<option value="${i}">${i}</option>`;
+      }
+
+      const heightSelect = document.getElementById('height_total');
+      for (let i = 36; i <= 95; i++) {
+        const feet = Math.floor(i / 12);
+        const inches = i % 12;
+        heightSelect.innerHTML += `<option value="${i}">${feet}'${inches}"</option>`;
+      }
+    });
+	
+	function validateFormFieldsAndToggleUpload() {
+  const age = document.getElementById('age');
+  const height = document.getElementById('height_total');
+  const weight = document.getElementById('weight');
+  const sport = document.getElementById('sport');
+  const uploadInput = document.getElementById('imageUpload');
+
+  const allFilled = age.value && height.value && weight.value && sport.value;
+  uploadInput.disabled = !allFilled;
+}
+
+// Revalidate on DOM ready and any input change
+window.addEventListener('DOMContentLoaded', () => {
+  const fields = ['age', 'height_total', 'weight', 'sport'];
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', validateFormFieldsAndToggleUpload);
+    el.addEventListener('input', validateFormFieldsAndToggleUpload);
+  });
+  validateFormFieldsAndToggleUpload();
+});
+
+	</script>
+  
+</body>
+</html>
