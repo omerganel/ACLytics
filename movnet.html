@@ -2,397 +2,845 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <!--title>MoveNet Knee Angle Analysis</title -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
-  <!-- TensorFlow.js core -->
+  <title>ACL Injury Risk Assessment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Bootstrap for basic normalization (optional but handy) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+
+  <!-- TFJS + Pose Detection -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <!-- TensorFlow.js WebGL backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
-  <!-- Pose Detection (includes MoveNet) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
 
   <style>
-    body {
-      font-family: sans-serif;
-      display: flex; flex-direction: column; align-items: center;
-      margin: 1rem; background: #f9f9f9;
+    :root{
+      --bg:#f6f7fb;
+      --surface:#ffffff;
+      --border:#e6e8ef;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --primary:#2563eb;
+      --primary-ink:#0b214a;
+      --shadow:0 6px 22px rgba(16,24,40,0.06);
+      --radius:14px;
+      --radius-sm:10px;
+      --maxw:1160px;
+
+      /* 3D button palette */
+      --btn-bg:#e5e7eb;
+      --btn-text:#111827;
+      --btn-edge:#cfd3da;
+      --btn-shadow:#b8bdc7;
     }
-    #status {
-      margin-bottom: 0.5rem;
-      font-weight: bold;
+    *{ box-sizing:border-box; }
+    html, body{ height:100%; }
+    body{
+      margin:0; color:var(--text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans";
+      line-height:1.35;
+      display:flex; flex-direction:column; min-height:100vh; /* sticky footer structure */
+      background: transparent;          /* transparent so bg layer shows */
+      overflow-x:hidden;
     }
-    #inputArea, #canvasArea, #controls, #gallery {
-      margin-top: 1rem;
-      width: 100%; max-width: 640px;
-      display: flex; justify-content: center;
+
+    /* ---- Stadium blurred background (both pages) ----
+       Place your image as stadium-bg.png next to this HTML file. */
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      background:url('stadium-bg.png') center/cover no-repeat;
+      filter: blur(10px) brightness(.85);
+      transform: scale(1.06); /* avoids edge gaps after blur */
+      z-index:0;
     }
-    #angleOutput {
-      margin-top: 0.5rem;
-      font-size: 1rem;
-      font-weight: bold;
-      text-align: center;
+    /* Soft vignette/overlay for contrast */
+    body::after{
+      content:"";
+      position:fixed; inset:0;
+      background:
+        radial-gradient(120% 100% at 50% 0%, rgba(0,0,0,.18) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%);
+      opacity:.25;
+      z-index:0;
+      pointer-events:none;
     }
-    canvas {
-      border: 1px solid #ccc; border-radius: 4px;
+
+    /* Top header bar */
+    .app-header{
+      background:rgba(255,255,255,.85);
+      -webkit-backdrop-filter:saturate(1.1) blur(4px);
+      backdrop-filter:saturate(1.1) blur(4px);
+      border-bottom:1px solid rgba(230,232,239,.7);
+      position:sticky; top:0; z-index:10; /* visible on both pages */
     }
-    #gallery {
-      flex-wrap: wrap; gap: 0.5rem;
+    .app-header .inner{
+      max-width:var(--maxw); margin:0 auto; padding:22px 20px;
+      display:flex; align-items:center; justify-content:center; /* center the title */
     }
-    #gallery img {
-      max-width: 200px; border: 1px solid #aaa; border-radius: 4px;
+    /* BIG centered title */
+    .app-title{ text-align:center; }
+    .app-title h1{
+      margin:0;
+      font-weight:900;
+      letter-spacing:.4px;
+      color:#0b214a;
+      font-size:clamp(32px, 6vw, 60px); /* large on both pages/sizes */
+      line-height:1.05;
+      text-shadow: 0 1px 0 rgba(255,255,255,.6);
     }
-    button {
-      margin: 0 0.5rem;
-      padding: 0.5rem 1rem;
-      font-size: 1rem;
+    .app-title .subtitle{
+      margin-top:6px;
+      color:#233657;
+      opacity:.85;
+      font-weight:700;
+      font-size:clamp(14px, 1.6vw, 18px);
+      letter-spacing:.2px;
+      text-shadow: 0 1px 0 rgba(255,255,255,.5);
     }
+
+    /* App frame */
+    #app{
+      max-width:var(--maxw);
+      margin:22px auto;
+      padding:0 20px;
+      transition:all .25s ease;
+      flex:1;
+    }
+    /* Expand to full width on the second page so image + analysis use entire width */
+    #app.split{
+      max-width:none;
+      width:100vw;
+      padding-left:12px;
+      padding-right:12px;
+    }
+
+    /* Cards (default) */
+    .card{
+      background:rgba(255,255,255,.86);
+      -webkit-backdrop-filter:saturate(1.05) blur(3px);
+      backdrop-filter:saturate(1.05) blur(3px);
+      border:1px solid rgba(230,232,239,.75);
+      border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; margin-bottom:16px;
+    }
+    .card h2{ font-size:1.05rem; margin:0 0 10px; }
+
+    /* ---------- Athlete Information section (light-grey, 3D, black font) ---------- */
+    .card-intake{
+      background: var(--btn-bg);
+      color: var(--btn-text);
+      border:1px solid var(--btn-edge);
+      box-shadow:
+        0 6px 0 var(--btn-shadow),
+        0 12px 22px rgba(0,0,0,.12);
+    }
+    /* Athlete Information title a little larger */
+    .card-intake > h2{
+      font-size:1.35rem;   /* slightly larger than default */
+      font-weight:800;
+      letter-spacing:.2px;
+      color: var(--btn-text);
+      margin-bottom:12px;
+    }
+
+    /* ---------- 3D Light-Grey Buttons (global) ---------- */
+    .btn,
+    .btn-primary,
+    .btn-outline,
+    button,
+    .chat-footer button{
+      background:var(--btn-bg) !important;      /* light grey */
+      color:var(--btn-text) !important;         /* black-ish font */
+      border:1px solid var(--btn-edge) !important;
+      border-radius:12px !important;
+      font-weight:800;                          /* engaging, friendly */
+      letter-spacing:.2px;
+      box-shadow:
+        0 4px 0 var(--btn-shadow),              /* hard 3D base */
+        0 8px 18px rgba(0,0,0,.12);             /* soft depth */
+      transform: translateY(0);
+      transition: transform .08s ease, box-shadow .08s ease, filter .08s ease;
+      text-rendering:optimizeLegibility;
+    }
+    .btn:hover,
+    .btn-primary:hover,
+    .btn-outline:hover,
+    button:hover,
+    .chat-footer button:hover{
+      filter: brightness(1.02);
+      transform: translateY(-1px);
+      box-shadow:
+        0 5px 0 var(--btn-shadow),
+        0 10px 20px rgba(0,0,0,.14);
+    }
+    .btn:active,
+    .btn-primary:active,
+    .btn-outline:active,
+    button:active,
+    .chat-footer button:active{
+      transform: translateY(2px);
+      box-shadow:
+        0 2px 0 var(--btn-shadow),
+        0 6px 12px rgba(0,0,0,.10);
+    }
+    .btn:focus-visible,
+    .btn-primary:focus-visible,
+    .btn-outline:focus-visible,
+    button:focus-visible,
+    .chat-footer button:focus-visible{
+      outline: 3px solid rgba(17,24,39,.35);
+      outline-offset: 2px;
+    }
+
+    /* ---------- Style the native "Choose File" button (and disabled state) ---------- */
+    #imageUpload::file-selector-button{
+      background:var(--btn-bg);
+      color:var(--btn-text);
+      border:1px solid var(--btn-edge);
+      border-radius:12px;
+      font-weight:800;
+      letter-spacing:.2px;
+      padding:10px 14px;
+      margin-right:10px;
+      box-shadow:0 4px 0 var(--btn-shadow), 0 8px 18px rgba(0,0,0,.12);
+      cursor:pointer;
+      transition: transform .08s ease, box-shadow .08s ease, filter .08s ease;
+    }
+    #imageUpload:disabled::file-selector-button{
+      opacity:.5;
+      cursor:not-allowed;
+      box-shadow:none;
+      transform:none;
+      filter:none;
+    }
+    #imageUpload::file-selector-button:hover{
+      filter:brightness(1.02);
+      transform:translateY(-1px);
+      box-shadow:0 5px 0 var(--btn-shadow), 0 10px 20px rgba(0,0,0,.14);
+    }
+    #imageUpload::file-selector-button:active{
+      transform:translateY(2px);
+      box-shadow:0 2px 0 var(--btn-shadow), 0 6px 12px rgba(0,0,0,.10);
+    }
+
+    /* Controls row */
+    #controlRow{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+
+    /* Workspace: switches to split layout once analysis runs */
+    #workspace{
+      display:grid; gap:16px; grid-template-columns: 1fr;
+      transition:grid-template-columns .25s ease, gap .25s ease;
+    }
+    /* On second page, use entire width and give the viewer a bigger share so it's wider horizontally */
+    #app.split #workspace{
+      grid-template-columns: 2fr 1fr; /* wider image column + analysis column */
+      column-gap:14px;
+      align-items:start;
+    }
+
+    /* Viewer (left) */
+    #viewer{
+      background:rgba(255,255,255,.86);
+      -webkit-backdrop-filter:saturate(1.05) blur(3px);
+      backdrop-filter:saturate(1.05) blur(3px);
+      border:1px solid rgba(230,232,239,.75);
+      border-radius:var(--radius); padding:12px; box-shadow:var(--shadow);
+      display:flex; flex-direction:column; gap:8px;
+      position:relative; z-index:1; /* above background */
+    }
+    .viewer-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:2px 2px 6px; color:var(--muted); font-size:.95rem;
+    }
+
+    /* KEY: make photo size consistent and prevent bloat */
+    #viewer .canvas-wrap{
+      position:relative;
+      width:100%;
+      /* Reserve a stable, responsive viewport for the canvas */
+      max-height:62vh;               /* default cap before analysis */
+      min-height:320px;              /* reasonable minimum */
+      overflow:hidden;               /* hide any accidental overflow */
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:#000;               /* letterbox look behind the canvas */
+      display:flex; align-items:center; justify-content:center;
+    }
+    /* The canvas intrinsic pixel size can be huge; scale it for display only */
+    #viewer canvas{
+      max-width:100%;
+      height:auto;
+      max-height:62vh;               /* default cap before analysis */
+      display:block;
+    }
+
+    /* Enlarge annotated image AFTER analysis (second page) */
+    #app.split #viewer .canvas-wrap{
+      max-height:88vh;               /* taller viewport */
+      min-height:620px;              /* bigger minimum for clarity */
+    }
+    #app.split #viewer canvas{
+      max-height:88vh;               /* allow canvas to grow vertically */
+    }
+
+    #status{ color:#1f2d4a; font-size:.95rem; text-shadow:0 1px 0 rgba(255,255,255,.6); }
+    #angleOutput{ font-weight:600; }
+
+    /* Chat (right) */
+    #chat{
+      background:rgba(255,255,255,.86);
+      -webkit-backdrop-filter:saturate(1.05) blur(3px);
+      backdrop-filter:saturate(1.05) blur(3px);
+      border:1px solid rgba(230,232,239,.75);
+      border-radius:var(--radius); box-shadow:var(--shadow);
+      display:flex; flex-direction:column; min-height:420px; overflow:hidden;
+      opacity:0; transform:translateY(6px); pointer-events:none; transition: all .25s ease;
+      position:relative; z-index:1; /* above background */
+    }
+    #app.split #chat{ opacity:1; transform:none; pointer-events:auto; }
+
+    /* Keep analysis in-view without lots of page scrolling */
+    #app.split #chat{
+      max-height:88vh;
+    }
+    #app.split #chat .chat-body{
+      overflow:auto;
+      max-height:calc(88vh - 120px); /* header + footer of chat */
+    }
+
+    .chat-header{
+      padding:12px 14px; border-bottom:1px solid var(--border);
+      font-weight:600; display:flex; align-items:center; justify-content:space-between;
+    }
+    .chat-body{
+      padding:12px 14px; overflow:auto; display:flex; flex-direction:column; gap:10px;
+    }
+    .msg{
+      max-width:86%; padding:10px 12px; border-radius:12px; font-size:.95rem;
+      border:1px solid var(--border);
+      background:#ffffff;
+    }
+    .msg.user{ align-self:flex-end; background:#f3f4f8; }
+    .msg.assistant{ align-self:flex-start; background:#fafafa; }
+
+    .chat-footer{
+      border-top:1px solid var(--border); padding:10px; display:flex; gap:8px; background:#fff;
+    }
+    .chat-footer input{
+      flex:1; border:1px solid var(--border); border-radius:10px; padding:10px 12px; outline:none; background:#fff;
+    }
+
+    /* ---- Post-analysis action buttons (second page, centered under analysis) ---- */
+    .post-actions{
+      display:none; /* hidden until second page */
+      gap:10px;
+      margin-top:10px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:center;     /* center buttons */
+      width:100%;
+    }
+    #app.split .post-actions{
+      display:flex;
+      grid-column: 2; /* place under the analysis column on desktop */
+    }
+    @media (max-width: 860px){
+      #app.split .post-actions{ grid-column:auto; }
+    }
+
+    /* Small screens */
+    @media (max-width: 1100px){
+      #app.split #workspace{ grid-template-columns: 1.5fr 1fr; }
+    }
+    @media (max-width: 860px){
+      #app.split #workspace{ grid-template-columns: 1fr; }
+      #viewer .canvas-wrap{ max-height:58vh; }
+
+      /* On mobile, still enlarge after analysis but keep sensible bounds */
+      #app.split #viewer .canvas-wrap{ max-height:78vh; min-height:420px; }
+      #app.split #viewer canvas{ max-height:78vh; }
+
+      #app.split #chat{ max-height:none; }
+      #app.split #chat .chat-body{ max-height:none; }
+    }
+
+    /* Footer credentials (small + dark) */
+    .app-footer{
+      text-align:center;
+      padding:12px 10px;
+      color:#0b214a;          /* dark color */
+      font-size:.85rem;       /* small size */
+      border-top:1px solid rgba(230,232,239,.7);
+      background:rgba(255,255,255,.85);
+      -webkit-backdrop-filter:saturate(1.05) blur(3px);
+      backdrop-filter:saturate(1.05) blur(3px);
+      position:relative; z-index:1; /* above background */
+    }
+
+    /* Printing tweaks (temporarily applied during PDF render) */
+    .printing #app.split #chat{ max-height:none !important; }
+    .printing #app.split #chat .chat-body{ max-height:none !important; }
   </style>
 </head>
 <body>
-
-  <h1 class="mb-4">ACL Injury Risk Assessment</h1>
-
-  <!-- User Form -->
-  <form id="user-form" enctype="multipart/form-data">
-    <!-- Age -->
-    <div class="mb-3">
-      <label for="age">Age:</label>
-      <select id="age" class="form-select" required>
-        <option value="" disabled selected>Select age</option>
-      </select>
+  <!-- Header -->
+  <div class="app-header">
+    <div class="inner">
+      <!-- Centered, large title visible across both “pages” -->
+      <div class="app-title">
+        <h1>ACLytics</h1>
+        <div class="subtitle">ACL Injury Risk Assessment</div>
+      </div>
     </div>
-
-    <!-- Height -->
-    <div class="mb-3">
-      <label for="height_total">Height (feet and inches):</label>
-      <select id="height_total" class="form-select" required>
-        <option value="" disabled selected>Select height</option>
-      </select>
-    </div>
-
-    <!-- Weight -->
-    <div class="mb-3">
-      <label for="weight">Weight (lbs):</label>
-      <input type="number" id="weight" class="form-control" min="50" max="300" required />
-    </div>
-
-    <!-- Sport -->
-    <div class="mb-3">
-      <label for="sport">Primary Sport:</label>
-      <select id="sport" class="form-select" required>
-        <option value="" disabled selected>Select sport</option>
-        <option>Soccer</option>
-        <option>Basketball</option>
-        <option>Football</option>
-        <option>Volleyball</option>
-        <option>Tennis</option>
-        <option>Padel</option>
-        <option>Track</option>
-      </select>
-    </div>
-
-  <!-- h1>MoveNet Knee Angle Analysis</h1 -->
-  <div id="status">Loading…</div>
-
-  <div id="inputArea">
-<input type="file" id="imageUpload" accept="image/*" disabled />
   </div>
 
-  <div id="canvasArea">
-    <canvas id="overlay" width="320" height="240"></canvas>
+  <!-- App -->
+  <div id="app">
+    <!-- Intake card (styled per request) -->
+    <div class="card card-intake">
+      <h2>Athlete Information</h2>
+      <form id="user-form" class="row g-3" enctype="multipart/form-data">
+        <div class="col-6 col-md-3">
+          <label for="age" class="form-label">Age</label>
+          <select id="age" class="form-select" required>
+            <option value="" disabled selected>Select age</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-3">
+          <label for="height_total" class="form-label">Height (ft, in)</label>
+          <select id="height_total" class="form-select" required>
+            <option value="" disabled selected>Select height</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-3">
+          <label for="weight" class="form-label">Weight (lbs)</label>
+          <input type="number" id="weight" class="form-control" min="50" max="500" required />
+        </div>
+        <div class="col-6 col-md-3">
+          <label for="sport" class="form-label">Primary Sport</label>
+          <select id="sport" class="form-select" required>
+            <option value="" disabled selected>Select sport</option>
+            <option>Soccer</option><option>Basketball</option><option>Football</option>
+            <option>Volleyball</option><option>Tennis</option><option>Padel</option><option>Track</option>
+          </select>
+        </div>
+      </form>
+
+      <div id="controlRow" class="mt-2">
+        <!-- Choose File button is disabled until the form is fully filled (logic below) -->
+        <input type="file" id="imageUpload" accept="image/*" disabled />
+        <button id="analyzeBtn" type="button" class="btn btn-primary" disabled>Run Your Risk Analysis</button>
+        <button id="captureBtn" type="button" class="btn btn-outline" hidden>Capture Annotated Image</button>
+        <div id="status" class="ms-auto">Loading…</div>
+      </div>
+      <div id="angleOutput" class="mt-2"></div>
+    </div>
+
+    <!-- Workspace -->
+    <div id="workspace">
+      <!-- Left: viewer -->
+      <div id="viewer">
+        <div class="viewer-header">
+          <div>Preview Image</div>
+          <div style="color:var(--muted); font-size:.9rem;"></div>
+        </div>
+        <div class="canvas-wrap">
+          <!-- Canvas intrinsic pixels can be large; display is capped by CSS -->
+          <canvas id="overlay" width="320" height="240"></canvas>
+        </div>
+      </div>
+
+      <!-- Right: chat -->
+      <div id="chat">
+        <div class="chat-header">
+          <span>Injury Risk Analysis</span>
+          <span style="color:var(--muted); font-weight:500; font-size:.95rem;"></span>
+        </div>
+        <div id="chatBody" class="chat-body"></div>
+        <div class="chat-footer">
+          <input id="followUp" type="text" placeholder="Ask a follow-up question…" />
+          <button id="askBtn" type="button">Send</button>
+        </div>
+      </div>
+
+      <!-- Post-analysis action buttons (second page, centered) -->
+      <div id="postActions" class="post-actions" aria-hidden="true">
+        <button id="assessAnotherBtn" type="button" class="btn">Assess Another Photo</button>
+        <button id="downloadPdfBtn" type="button" class="btn">Download as PDF</button>
+      </div>
+    </div>
   </div>
 
-  <div id="controls">
-    <button id="analyzeBtn" type="button" disabled>Run Your Analysis</button>
-    <button id="captureBtn" type="button" hidden>Capture Annotated Image</button>
+  <!-- Footer (visible on both pages thanks to flex layout) -->
+  <div class="app-footer">
+    Developed by Omer Gan-El in 2025
   </div>
-  <div id="angleOutput"></div>
 
-  <div id="gallery"></div>
+  <!-- html2canvas + jsPDF for PDF download -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
-
-
+  <!-- ===== Logic (unchanged in spirit; includes gating for Choose File) ===== -->
   <script>
-    const statusEl     = document.getElementById('status');
-    const uploadInput  = document.getElementById('imageUpload');
-    const analyzeBtn   = document.getElementById('analyzeBtn');
-    const captureBtn   = document.getElementById('captureBtn');
-    const angleOutput  = document.getElementById('angleOutput');
-    const canvasEl     = document.getElementById('overlay');
-    const ctx          = canvasEl.getContext('2d');
+    // ---------- constants ----------
+    const POSE_MIN=0.35, KP_MIN=0.35, MODEL_IN=256;
 
-    let detector = null;
-    let uploadedImage = null;
+    // ---------- DOM ----------
+    const app=document.getElementById('app');
+    const statusEl=document.getElementById('status');
+    const uploadInput=document.getElementById('imageUpload');
+    const analyzeBtn=document.getElementById('analyzeBtn');
+    const captureBtn=document.getElementById('captureBtn');
+    const angleOutput=document.getElementById('angleOutput');
+    const canvasEl=document.getElementById('overlay');
+    const ctx=canvasEl.getContext('2d');
+    const chatBody=document.getElementById('chatBody');
+    const followUp=document.getElementById('followUp');
+    const askBtn=document.getElementById('askBtn');
 
-    // Compute angle at joint J for points A-J-B
-    function calculateAngle(a, j, b) {
-      const v1 = { x: a.x - j.x, y: a.y - j.y };
-      const v2 = { x: b.x - j.x, y: b.y - j.y };
-      const dot = v1.x * v2.x + v1.y * v2.y;
-      const mag1 = Math.hypot(v1.x, v1.y);
-      const mag2 = Math.hypot(v2.x, v2.y);
-      if (mag1 === 0 || mag2 === 0) return 0;
-      const cos = Math.min(Math.max(dot / (mag1 * mag2), -1), 1);
-      return Math.acos(cos) * (180 / Math.PI);
+    const assessAnotherBtn=document.getElementById('assessAnotherBtn');
+    const downloadPdfBtn=document.getElementById('downloadPdfBtn');
+
+    let detector=null, uploadedImage=null;
+    let lastAngles={left:null, right:null}, lastMeta=null;
+
+    // ---------- utilities ----------
+    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+    const toVec=(a,b)=>({x:a.x-b.x,y:a.y-b.y});
+    const dot=(u,v)=>u.x*v.x+u.y*v.y, norm=u=>Math.hypot(u.x,u.y);
+    function calculateAngle(a,j,b){
+      const v1=toVec(a,j), v2=toVec(b,j); const n1=norm(v1), n2=norm(v2);
+      if(n1<1e-6||n2<1e-6) return null;
+      let c=dot(v1,v2)/(n1*n2); c=clamp(c,-1,1);
+      return Math.acos(c)*180/Math.PI;
+    }
+    function kpNamed(kps, name){ return kps.find(k=>k.name===name); }
+    function jointsReady(h,k,a,poseScore){
+      return poseScore>=POSE_MIN && h?.score>=KP_MIN && k?.score>=KP_MIN && a?.score>=KP_MIN;
+    }
+    function makeCanvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+    // Letterbox to model size
+    function letterboxToSquare(img){
+      const inW=img.width, inH=img.height;
+      const scale=Math.min(MODEL_IN/inW, MODEL_IN/inH);
+      const drawW=Math.round(inW*scale), drawH=Math.round(inH*scale);
+      const offX=Math.floor((MODEL_IN-drawW)/2), offY=Math.floor((MODEL_IN-drawH)/2);
+      const canvas=makeCanvas(MODEL_IN,MODEL_IN), ictx=canvas.getContext('2d');
+      ictx.fillStyle='black'; ictx.fillRect(0,0,MODEL_IN,MODEL_IN);
+      ictx.drawImage(img, offX, offY, drawW, drawH);
+      const undo=pts=>pts.map(p=>({...p, x:(p.x-offX)/scale, y:(p.y-offY)/scale}));
+      return {canvas, undo};
+    }
+    function rotateCanvas(img,deg){
+      const rad=deg*Math.PI/180, w=img.width, h=img.height;
+      const c=makeCanvas(w,h), x=c.getContext('2d');
+      x.translate(w/2,h/2); x.rotate(rad); x.drawImage(img,-w/2,-h/2);
+      const undo=pts=>pts.map(p=>{
+        const X=p.x-w/2, Y=p.y-h/2;
+        const xr=X*Math.cos(-rad)-Y*Math.sin(-rad);
+        const yr=X*Math.sin(-rad)+Y*Math.cos(-rad);
+        return {...p, x:xr+w/2, y:yr+h/2};
+      });
+      return {canvas:c, undo};
+    }
+    function flipHCanvas(img){
+      const w=img.width,h=img.height; const c=makeCanvas(w,h), x=c.getContext('2d');
+      x.translate(w,0); x.scale(-1,1); x.drawImage(img,0,0);
+      const undo=pts=>pts.map(p=>({...p, x:w-p.x}));
+      return {canvas:c, undo};
     }
 
-    // 1. Load and initialize MoveNet
-    async function setupModel() {
-      try {
-        statusEl.innerText = 'Initializing…';
-        await tf.ready();
-        statusEl.innerText = 'Setting backend…';
-        await tf.setBackend('webgl');
-
-        statusEl.innerText = 'Loading…';
+    // ---------- detector ----------
+    async function setupModel(){
+      try{
+        statusEl.innerText='Initializing…';
+        await tf.ready(); await tf.setBackend('webgl');
         detector = await poseDetection.createDetector(
           poseDetection.SupportedModels.MoveNet,
-          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
         );
-
-        statusEl.innerText = 'Please upload your image.';
-      } catch (err) {
-        console.error('Model load error:', err);
-        statusEl.innerText = `Error loading model: ${err.message}`;
+        statusEl.innerText='Please complete the form, then upload an image.';
+      }catch(err){
+        console.error(err); statusEl.innerText=`Error loading model: ${err.message}`;
       }
     }
 
-    // 2. Handle image upload
-    uploadInput.addEventListener('change', () => {
-      const file = uploadInput.files[0];
-      if (!file) return;
-
-      statusEl.innerText = 'Loading image…';
-      analyzeBtn.disabled = true;
-      captureBtn.disabled = true;
-      angleOutput.innerText = '';
-
-      const url = URL.createObjectURL(file);
-      uploadedImage = new Image();
-      uploadedImage.onload = () => {
-        canvasEl.width  = uploadedImage.width; 
-        canvasEl.height = uploadedImage.height; 
-        ctx.drawImage(uploadedImage, 0, 0);
-
-        statusEl.innerText = 'Image ready. Click “Run Your Analysis.”';
-        analyzeBtn.disabled = false;
-      };
-      uploadedImage.onerror = (e) => {
-        console.error('Image load error:', e);
-        statusEl.innerText = 'Error loading image.';
-      };
-      uploadedImage.src = url;
-    });
-
-    // 3. Run pose detection
-    analyzeBtn.addEventListener('click', async (event) => {
-  event.preventDefault();
-  if (!detector || !uploadedImage) return;
-
-  let attempts = 0;
-  const maxAttempts = 3;
-
-  const runDetection = async () => {
-    attempts++;
-    statusEl.innerText = `Running pose detection… (Attempt ${attempts})`;
-    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-    ctx.drawImage(uploadedImage, 0, 0);
-    angleOutput.innerText = '';
-
-    try {
-      const poses = await detector.estimatePoses(uploadedImage);
-      if (poses.length === 0) {
-        throw new Error('No person detected. Try another image.');
-      }
-
-      const keypoints = poses[0].keypoints;
-      const kp = keypoints.reduce((m, k) => (m[k.name] = k, m), {});
-
-      let leftAngle = 0, rightAngle = 0;
-      if (kp.left_hip?.score > 0.5 && kp.left_knee?.score > 0.5 && kp.left_ankle?.score > 0.5) {
-        leftAngle = calculateAngle(kp.left_hip, kp.left_knee, kp.left_ankle);
-      }
-      if (kp.right_hip?.score > 0.5 && kp.right_knee?.score > 0.5 && kp.right_ankle?.score > 0.5) {
-        rightAngle = calculateAngle(kp.right_hip, kp.right_knee, kp.right_ankle);
-      }
-
-      // If either angle is 0 and we haven't reached max attempts, retry
-      if ((leftAngle === 0 || rightAngle === 0) && attempts < maxAttempts) {
-        await runDetection();
-        return;
-      }
-
-      drawSkeleton(keypoints);
-      angleOutput.innerText = 
-        `Left knee angle: ${leftAngle.toFixed(1)}°   —   Right knee angle: ${rightAngle.toFixed(1)}°`;
-      statusEl.innerText = 'Pose detected! Creating new image...';
-captureBtn.disabled = false;
-
-// Automatically capture the canvas
-const img = new Image();
-img.src = canvasEl.toDataURL('image/png');
-document.getElementById('gallery').appendChild(img);
-
-<!-- API CALL -->
-
-// 📦 Wrap image and GPT response
-const wrapper = document.createElement('div');
-wrapper.style.marginBottom = '1rem';
-wrapper.appendChild(img);
-
-// 🧠 GPT response container
-const gptResponse = document.createElement('div');
-gptResponse.innerText = "Loading Your Analysis...";
-gptResponse.style.marginTop = '0.5rem';
-gptResponse.style.padding = '0.5rem';
-gptResponse.style.background = '#f1f1f1';
-gptResponse.style.border = '1px solid #ccc';
-gptResponse.style.borderRadius = '4px';
-gptResponse.style.fontSize = '14px';
-wrapper.appendChild(gptResponse);
-
-// 📥 Append both to gallery
-document.getElementById('gallery').appendChild(wrapper);
-
-// 📤 Send API call to Flask
-const age = document.getElementById('age').value;
-const height = document.getElementById('height_total').value;
-const weight = document.getElementById('weight').value;
-const sport = document.getElementById('sport').value;
-const imageBase64 = canvasEl.toDataURL("image/png");
-
-fetch("http://localhost:5000/api/gpt", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    age,
-    height,
-    weight,
-    sport,
-    leftKneeAngle: leftAngle.toFixed(1),
-    rightKneeAngle: rightAngle.toFixed(1),
-    imageBase64
-  })
-})
-.then(res => res.json())
-.then(data => {
-  gptResponse.innerText = data.reply || "No response received.";
-})
-.catch(err => {
-  gptResponse.innerText = "Error contacting GPT server: " + err.message;
-});
-<!-- API CALL END -->
-
-
-    } catch (err) {
-      console.error('Detection error:', err);
-      statusEl.innerText = `Error during detection: ${err.message}`;
+    // ---------- form gating ----------
+    function validateFormFieldsAndToggleUpload(){
+      const age=document.getElementById('age');
+      const height=document.getElementById('height_total');
+      const weight=document.getElementById('weight');
+      const sport=document.getElementById('sport');
+      // Enable Choose File ONLY if all fields are filled
+      uploadInput.disabled=!(age.value && height.value && weight.value && sport.value);
+      // Also enable/disable "Run Your Analysis" based on whether an image is loaded
+      analyzeBtn.disabled = !uploadedImage;
     }
-  };
-
-  await runDetection();
-});
-
-
-    // 4. Capture annotated image
-    captureBtn.addEventListener('click', () => {
-	event.preventDefault();
-      const img = new Image();
-      img.src = canvasEl.toDataURL('image/png');
-      document.getElementById('gallery').appendChild(img);
+    window.addEventListener('DOMContentLoaded',()=>{
+      const ageSelect=document.getElementById('age');
+      for(let i=10;i<=99;i++) ageSelect.insertAdjacentHTML('beforeend',`<option value="${i}">${i}</option>`);
+      const heightSelect=document.getElementById('height_total');
+      for(let i=48;i<=84;i++){ const f=Math.floor(i/12),n=i%12;
+        heightSelect.insertAdjacentHTML('beforeend',`<option value="${i}">${f}'${n}"</option>`); }
+      ['age','height_total','weight','sport'].forEach(id=>{
+        const el=document.getElementById(id);
+        el.addEventListener('change',validateFormFieldsAndToggleUpload);
+        el.addEventListener('input',validateFormFieldsAndToggleUpload);
+      });
+      validateFormFieldsAndToggleUpload();
     });
 
-    // Draw keypoints, skeleton, and knee-angle labels
-    function drawSkeleton(keypoints) {
-      ctx.fillStyle   = 'lime';
-      ctx.strokeStyle = 'lime';
-      ctx.lineWidth   = 2;
+    // ---------- upload (display is capped by CSS, not canvas pixels) ----------
+    uploadInput.addEventListener('change',()=>{
+      const file=uploadInput.files[0]; if(!file) return;
+      statusEl.innerText='Loading image…'; analyzeBtn.disabled=true; angleOutput.innerText='';
+      const url=URL.createObjectURL(file); uploadedImage=new Image();
+      uploadedImage.onload=()=>{
+        // Keep full-resolution pixels for drawing, but display is clamped via CSS max-height/width
+        canvasEl.width=uploadedImage.width;
+        canvasEl.height=uploadedImage.height;
+        ctx.drawImage(uploadedImage,0,0);
+        statusEl.innerText='Image ready. Click “Run Your Risk Analysis.”';
+        analyzeBtn.disabled=false;
+      };
+      uploadedImage.onerror=()=>{ statusEl.innerText='Error loading image.'; };
+      uploadedImage.src=url;
+    });
 
-      // Draw points
-      keypoints.forEach(kp => {
-        if (kp.score > 0.5) {
-          ctx.beginPath();
-          ctx.arc(kp.x, kp.y, 5, 0, 2 * Math.PI);
-          ctx.fill();
+    // ---------- detection helpers ----------
+    async function estimateOn(input){ return detector.estimatePoses(input,{flipHorizontal:false}); }
+    function summarizeLegScores(kps, side){
+      const hip=kpNamed(kps,`${side}_hip`), knee=kpNamed(kps,`${side}_knee`), ankle=kpNamed(kps,`${side}_ankle`);
+      const avg=((hip?.score||0)+(knee?.score||0)+(ankle?.score||0))/3; return {hip,knee,ankle,avg};
+    }
+    function kpNamed(kps, name){ return kps.find(k=>k.name===name); }
+    function pickBestPose(poses, undo=(p)=>p, WH){
+      if(!poses||!poses.length) return null;
+      const pose=poses.reduce((a,b)=>a.score>b.score?a:b);
+      const kps=undo(pose.keypoints.map(k=>({name:k.name, x:k.x, y:k.y, score:k.score})));
+      const [W,H]=WH; kps.forEach(p=>{ p.x=clamp(p.x,0,W); p.y=clamp(p.y,0,H); });
+      const L=summarizeLegScores(kps,'left'), R=summarizeLegScores(kps,'right');
+      const scoreSum=(pose.score||0)+L.avg+R.avg;
+      return {poseScore:pose.score||0,kps,L,R,scoreSum};
+    }
+    async function detectWithRetries(img){
+      const [W,H]=[img.width,img.height];
+      const base=letterboxToSquare(img); let poses=await estimateOn(base.canvas);
+      let best=pickBestPose(poses, pts=>base.undo(pts), [W,H]);
+      const candidates=[best].filter(Boolean);
+      const scalers=[0.85,1.0,1.15], rots=[-12,-6,6,12];
+
+      for(const s of scalers){
+        const tmp=makeCanvas(Math.round(W*s),Math.round(H*s)), t=tmp.getContext('2d');
+        t.drawImage(img,0,0,tmp.width,tmp.height);
+        const lb=letterboxToSquare(tmp), p=await estimateOn(lb.canvas);
+        const undoAll=pts=>lb.undo(pts).map(q=>({...q,x:q.x/s,y:q.y/s}));
+        const cand=pickBestPose(p,undoAll,[W,H]); if(cand) candidates.push(cand);
+      }
+      for(const d of rots){
+        const rot=rotateCanvas(img,d), lb=letterboxToSquare(rot.canvas), p=await estimateOn(lb.canvas);
+        const cand=pickBestPose(p, pts=>rot.undo(lb.undo(pts)), [W,H]); if(cand) candidates.push(cand);
+      }
+      { const flp=flipHCanvas(img), lb=letterboxToSquare(flp.canvas), p=await estimateOn(lb.canvas);
+        const cand=pickBestPose(p, pts=>flp.undo(lb.undo(pts)), [W,H]); if(cand) candidates.push(cand); }
+
+      candidates.sort((a,b)=>b.scoreSum-a.scoreSum);
+      return candidates[0]||null;
+    }
+
+    // Angle labels: smaller, bright magenta, still visible
+    function drawSkeletonAndAngles(kps, leftAngle, rightAngle){
+      // bones + keypoints
+      ctx.fillStyle='lime'; ctx.strokeStyle='lime'; ctx.lineWidth=2;
+      kps.forEach(k=>{ if(k.score>=KP_MIN){ ctx.beginPath(); ctx.arc(k.x,k.y,4,0,2*Math.PI); ctx.fill(); }});
+      const map=Object.fromEntries(kps.map(k=>[k.name,k]));
+      const pairs=[['left_hip','left_knee'],['left_knee','left_ankle'],['right_hip','right_knee'],['right_knee','right_ankle']];
+      pairs.forEach(([a,b])=>{ const p=map[a], q=map[b]; if(p?.score>=KP_MIN && q?.score>=KP_MIN){ ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); }});
+
+      // dynamic font sizing: smaller but clear
+      const baseSize = Math.max(18, Math.round(Math.min(canvasEl.width, canvasEl.height) / 20));
+      ctx.font = `bold ${baseSize}px Arial, Helvetica, sans-serif`;
+      ctx.textBaseline = 'bottom';
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+
+      // subtle dark outline + bright magenta fill
+      ctx.lineWidth = Math.max(2, Math.round(baseSize * 0.10));
+      ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillStyle = '#ff00ff';
+
+      const lk=map['left_knee'], rk=map['right_knee'];
+      if(lk && leftAngle!=null){
+        const lx = lk.x + 8, ly = lk.y - 8;
+        const textL = `${leftAngle.toFixed(0)}°`;
+        ctx.strokeText(textL, lx, ly);
+        ctx.fillText(textL, lx, ly);
+      }
+      if(rk && rightAngle!=null){
+        const rx = rk.x + 8, ry = rk.y - 8;
+        const textR = `${rightAngle.toFixed(0)}°`;
+        ctx.strokeText(textR, rx, ry);
+        ctx.fillText(textR, rx, ry);
+      }
+    }
+
+    // ---------- chat ----------
+    function addMsg(text, who='assistant'){
+      const div=document.createElement('div'); div.className=`msg ${who}`; div.textContent=text;
+      chatBody.appendChild(div); chatBody.scrollTop=chatBody.scrollHeight;
+    }
+    function getFormValues(){
+      return {
+        age:document.getElementById('age').value,
+        height:document.getElementById('height_total').value,
+        weight:document.getElementById('weight').value,
+        sport:document.getElementById('sport').value
+      };
+    }
+
+    // ---------- run analysis ----------
+    analyzeBtn.addEventListener('click', async(e)=>{
+      e.preventDefault(); if(!detector || !uploadedImage) return;
+
+      try{
+        statusEl.innerText='Running pose detection…';
+        ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+        ctx.drawImage(uploadedImage,0,0);
+        angleOutput.innerText='';
+
+        const best=await detectWithRetries(uploadedImage);
+        if(!best){ statusEl.innerText='No person detected. Try another image with full-body view.'; return; }
+
+        // Compute angles for BOTH legs
+        let leftAngle=null, rightAngle=null;
+        if(jointsReady(best.L.hip,best.L.knee,best.L.ankle,best.poseScore)){
+          leftAngle=calculateAngle(best.L.hip,best.L.knee,best.L.ankle);
         }
-      });
-
-      // Draw connections
-      const pairs = [
-        ['left_hip','left_knee'], ['left_knee','left_ankle'],
-        ['right_hip','right_knee'], ['right_knee','right_ankle']
-      ];
-      const lookup = keypoints.reduce((m, kp) => (m[kp.name] = kp, m), {});
-      pairs.forEach(([a, b]) => {
-        const p1 = lookup[a], p2 = lookup[b];
-        if (p1.score > 0.5 && p2.score > 0.5) {
-          ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.stroke();
+        if(jointsReady(best.R.hip,best.R.knee,best.R.ankle,best.poseScore)){
+          rightAngle=calculateAngle(best.R.hip,best.R.knee,best.R.ankle);
         }
-      });
 
-      // Overlay knee angles in red
-      ctx.fillStyle = 'red';
-      ctx.font      = '18px Arial';
-      [['left_hip','left_knee','left_ankle'], ['right_hip','right_knee','right_ankle']]
-        .forEach(([a,j,b]) => {
-          const A = lookup[a], J = lookup[j], B = lookup[b];
-          if (A.score>0.5 && J.score>0.5 && B.score>0.5) {
-            const angle = calculateAngle(A, J, B);
-            ctx.fillText(`${angle.toFixed(0)}°`, J.x + 5, J.y - 5);
-          }
+        // Gate: proceed ONLY if BOTH angles are available (both legs visible)
+        if(leftAngle==null || rightAngle==null){
+          statusEl.innerText='Both legs must be visible. Please upload a photo that clearly shows both legs (hips–knees–ankles).';
+          angleOutput.innerText='Need both legs visible to continue.';
+          chatBody.innerHTML='';
+          return; // do not go to second page; do not call backend
+        }
+
+        // Draw skeleton + ALWAYS show both angle labels
+        ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+        ctx.drawImage(uploadedImage,0,0);
+        drawSkeletonAndAngles(best.kps,leftAngle,rightAngle);
+
+        // Text summary (both angles)
+        angleOutput.innerText=`Left knee: ${leftAngle.toFixed(1)}° — Right knee: ${rightAngle.toFixed(1)}°`;
+        statusEl.innerText='Pose detection complete.';
+
+        // Switch to split layout (moves image left, shows chat right)
+        app.classList.add('split');
+
+        // Prepare payload
+        const meta=getFormValues();
+        const annotated=canvasEl.toDataURL('image/png');
+        lastAngles={left:leftAngle, right:rightAngle}; lastMeta=meta;
+
+        // Chat: initial placeholder then backend reply
+        chatBody.innerHTML=''; addMsg('Analyzing your image and angles…','assistant');
+
+        const payload={...meta,
+          leftKneeAngle: leftAngle.toFixed(1),
+          rightKneeAngle:rightAngle.toFixed(1),
+          imageBase64: annotated
+        };
+        const res=await fetch("http://localhost:5000/api/gpt", {
+          method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload)
         });
-    }
+        const data=await res.json();
+        chatBody.lastElementChild?.remove();
+        addMsg(data.reply || 'No response received.','assistant');
 
-    // Initialize on load
+      }catch(err){
+        console.error(err);
+        statusEl.innerText=`Error during detection: ${err.message}`;
+        addMsg(`Error: ${err.message}`,'assistant');
+      }
+    });
+
+    // ---------- follow-up ----------
+    askBtn.addEventListener('click', async()=>{
+      const q=followUp.value.trim(); if(!q) return;
+      addMsg(q,'user'); followUp.value='';
+      if(!lastMeta){ addMsg('Please run an analysis first.','assistant'); return; }
+
+      addMsg('Thinking…','assistant');
+      try{
+        const res=await fetch("http://localhost:5000/api/gpt",{
+          method:"POST", headers:{ "Content-Type":"application/json" },
+          body:JSON.stringify({
+            ...lastMeta,
+            leftKneeAngle:  lastAngles.left!=null ? lastAngles.left.toFixed(1)  : null,
+            rightKneeAngle: lastAngles.right!=null ? lastAngles.right.toFixed(1) : null,
+            imageBase64: canvasEl.toDataURL('image/png'),
+            userQuestion:q
+          })
+        });
+        const data=await res.json();
+        chatBody.lastElementChild?.remove();
+        addMsg(data.reply || 'No response received.','assistant');
+      }catch(err){
+        chatBody.lastElementChild?.remove();
+        addMsg(`Error: ${err.message}`,'assistant');
+      }
+    });
+
+    // ---------- Post-analysis buttons logic ----------
+    assessAnotherBtn.addEventListener('click', ()=>{
+      // Reset to page 1 and clear state
+      ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+      canvasEl.width=320; canvasEl.height=240;
+      angleOutput.innerText='';
+      chatBody.innerHTML='';
+      uploadedImage=null;
+      uploadInput.value='';
+      analyzeBtn.disabled=true;
+      app.classList.remove('split');
+      statusEl.innerText='Please complete the form, then upload an image.';
+      window.scrollTo({top:0, behavior:'smooth'});
+    });
+
+    async function downloadSecondPagePDF(){
+      const el=document.getElementById('workspace');
+      document.body.classList.add('printing');
+      await new Promise(r=>setTimeout(r,50)); // allow styles to settle
+
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        windowWidth: el.scrollWidth,
+        windowHeight: el.scrollHeight
+      });
+
+      document.body.classList.remove('printing');
+
+      const imgData = canvas.toDataURL('image/png');
+      const { jsPDF } = window.jspdf;
+      const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+      const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save('ACLytics-Assessment.pdf');
+    }
+    downloadPdfBtn.addEventListener('click', downloadSecondPagePDF);
+
+    // ---------- manual capture ----------
+    captureBtn.addEventListener('click',(e)=>{
+      e.preventDefault();
+      const img=new Image(); img.src=canvasEl.toDataURL('image/png');
+      const w=window.open('about:blank'); w.document.write(img.outerHTML);
+    });
+
+    // ---------- boot ----------
     setupModel();
   </script>
-  <script>
-    //let detector = null;
-    let modelReady = true;
-
-    // Populate age and height options
-    window.addEventListener('DOMContentLoaded', () => {
-      const ageSelect = document.getElementById('age');
-      for (let i = 10; i <= 99; i++) {
-        ageSelect.innerHTML += `<option value="${i}">${i}</option>`;
-      }
-
-      const heightSelect = document.getElementById('height_total');
-      for (let i = 36; i <= 95; i++) {
-        const feet = Math.floor(i / 12);
-        const inches = i % 12;
-        heightSelect.innerHTML += `<option value="${i}">${feet}'${inches}"</option>`;
-      }
-    });
-	
-	function validateFormFieldsAndToggleUpload() {
-  const age = document.getElementById('age');
-  const height = document.getElementById('height_total');
-  const weight = document.getElementById('weight');
-  const sport = document.getElementById('sport');
-  const uploadInput = document.getElementById('imageUpload');
-
-  const allFilled = age.value && height.value && weight.value && sport.value;
-  uploadInput.disabled = !allFilled;
-}
-
-// Revalidate on DOM ready and any input change
-window.addEventListener('DOMContentLoaded', () => {
-  const fields = ['age', 'height_total', 'weight', 'sport'];
-  fields.forEach(id => {
-    const el = document.getElementById(id);
-    el.addEventListener('change', validateFormFieldsAndToggleUpload);
-    el.addEventListener('input', validateFormFieldsAndToggleUpload);
-  });
-  validateFormFieldsAndToggleUpload();
-});
-
-	</script>
-  
 </body>
 </html>
