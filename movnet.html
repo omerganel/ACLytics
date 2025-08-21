@@ -43,26 +43,30 @@
       overflow-x:hidden;
     }
 
-    /* ---- Stadium blurred background (both pages) ----
-       Place your image as stadium-bg.png next to this HTML file. */
-    body::before{
-      content:"";
-      position:fixed; inset:0;
-      background:url('stadium-bg.png') center/cover no-repeat;
-      filter: blur(10px) brightness(.85);
-      transform: scale(1.06); /* avoids edge gaps after blur */
-      z-index:0;
-    }
-    /* Soft vignette/overlay for contrast */
-    body::after{
-      content:"";
-      position:fixed; inset:0;
-      background:
-        radial-gradient(120% 100% at 50% 0%, rgba(0,0,0,.18) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%);
-      opacity:.25;
-      z-index:0;
-      pointer-events:none;
-    }
+   /* ---- Stadium blurred background (both pages) — REPLACE THIS BLOCK ---- */
+body::before{
+  content:"";
+  position:fixed; inset:0;
+  background:
+    /* 1) Preferred: your local image next to this HTML file */
+    url('stadium-bg.png') center/cover no-repeat,
+    /* 2) Fallback: baked-in blurred stadium SVG so it always shows */
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 900'><defs><radialGradient id='g' cx='50%' cy='50%' r='60%'><stop offset='0%' stop-color='%231f6f4a'/><stop offset='100%' stop-color='%230a2a1d'/></radialGradient></defs><rect width='1600' height='900' fill='url(%23g)'/><g opacity='0.15' stroke='%23ffffff' stroke-width='8' fill='none'><rect x='200' y='150' width='1200' height='600' rx='40'/><line x1='800' y1='150' x2='800' y2='750'/><circle cx='800' cy='450' r='90'/><rect x='200' y='330' width='180' height='240' rx='20'/><rect x='1220' y='330' width='180' height='240' rx='20'/></g></svg>") center/cover no-repeat;
+  filter: blur(10px) brightness(.85);
+  transform: scale(1.06);
+  z-index:0;
+}
+/* Soft vignette overlay for contrast */
+body::after{
+  content:"";
+  position:fixed; inset:0;
+  background: radial-gradient(120% 100% at 50% 0%, rgba(0,0,0,.18) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%);
+  opacity:.25;
+  z-index:0;
+  pointer-events:none;
+}
+/* ---- END REPLACEMENT ---- */
+
 
     /* Top header bar */
     .app-header{
