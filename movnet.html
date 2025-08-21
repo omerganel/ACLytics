@@ -43,26 +43,36 @@
       overflow-x:hidden;
     }
 
-    /* ---- Stadium blurred background (both pages) ----
-       Place your image as stadium-bg.png next to this HTML file. */
-    body::before{
-      content:"";
-      position:fixed; inset:0;
-      background:url('stadium-bg.png') center/cover no-repeat;
-      filter: blur(10px) brightness(.85);
-      transform: scale(1.06); /* avoids edge gaps after blur */
-      z-index:0;
-    }
-    /* Soft vignette/overlay for contrast */
-    body::after{
-      content:"";
-      position:fixed; inset:0;
-      background:
-        radial-gradient(120% 100% at 50% 0%, rgba(0,0,0,.18) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%);
-      opacity:.25;
-      z-index:0;
-      pointer-events:none;
-    }
+  /* ---- Stadium blurred background (ships with the app) ---- */
+:root{
+  /* Keep the asset path local so it works for any user who downloads the folder */
+  --stadium-bg: url('stadium-bg.png');
+}
+
+/* Leave body background transparent so the backdrop layers show */
+body{ background: transparent; }
+
+/* Fixed, full-viewport backdrop with blur + brightness */
+body::before{
+  content:"";
+  position:fixed; inset:0;
+  background: var(--stadium-bg) center/cover no-repeat;
+  filter: blur(10px) brightness(.85);
+  transform: scale(1.06); /* avoids edge gaps after blur */
+  z-index:0;
+}
+
+/* Soft vignette/overlay for contrast */
+body::after{
+  content:"";
+  position:fixed; inset:0;
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(0,0,0,.18) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%);
+  opacity:.25;
+  z-index:0;
+  pointer-events:none;
+}
+
 
     /* Top header bar */
     .app-header{
@@ -404,6 +414,7 @@
     }
   </style>
 </head>
+<link rel="preload" as="image" href="stadium-bg.png">
 <body>
   <!-- Header -->
   <div class="app-header">
